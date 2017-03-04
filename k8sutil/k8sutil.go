@@ -163,11 +163,6 @@ func (k *K8sutilInterface) WatchNamespaces(stop chan struct{}, resyncPeriod time
 					log.Println(err)
 				}
 			},
-			UpdateFunc: func(oldObj interface{}, newObj interface{}) {
-				if err := handler(newObj.(*v1.Namespace)); err != nil {
-					log.Println(err)
-				}
-			},
 		},
 	)
 	c.Run(stop)
