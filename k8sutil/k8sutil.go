@@ -1,11 +1,17 @@
 package k8sutil
 
 import (
+	"log"
+	"time"
+
 	"github.com/Sirupsen/logrus"
 	"k8s.io/client-go/kubernetes"
 	coreType "k8s.io/client-go/kubernetes/typed/core/v1"
+	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/pkg/api/v1"
+	"k8s.io/client-go/pkg/fields"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
@@ -14,6 +20,7 @@ type KubeInterface interface {
 	Secrets(namespace string) coreType.SecretInterface
 	Namespaces() coreType.NamespaceInterface
 	ServiceAccounts(namespace string) coreType.ServiceAccountInterface
+	Core() v1core.CoreV1Interface
 }
 
 type K8sutilInterface struct {
@@ -143,4 +150,25 @@ func (k *K8sutilInterface) UpdateServiceAccount(namespace string, sa *v1.Service
 	}
 
 	return nil
+}
+
+func (k *K8sutilInterface) WatchNamespaces(stop chan struct{}, resyncPeriod time.Duration, handler func(*v1.Namespace) error) {
+	_, c := cache.NewInformer(
+		cache.NewListWatchFromClient(k.Kclient.Core().RESTClient(), "namespaces", v1.NamespaceAll, fields.Everything()),
+		&v1.Namespace{},
+		resyncPeriod,
+		cache.ResourceEventHandlerFuncs{
+			AddFunc: func(obj interface{}) {
+				if err := handler(obj.(*v1.Namespace)); err != nil {
+					log.Println(err)
+				}
+			},
+			UpdateFunc: func(oldObj interface{}, newObj interface{}) {
+				if err := handler(newObj.(*v1.Namespace)); err != nil {
+					log.Println(err)
+				}
+			},
+		},
+	)
+	c.Run(stop)
 }
