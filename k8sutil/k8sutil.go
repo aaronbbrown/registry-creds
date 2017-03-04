@@ -152,7 +152,8 @@ func (k *K8sutilInterface) UpdateServiceAccount(namespace string, sa *v1.Service
 	return nil
 }
 
-func (k *K8sutilInterface) WatchNamespaces(stop chan struct{}, resyncPeriod time.Duration, handler func(*v1.Namespace) error) {
+func (k *K8sutilInterface) WatchNamespaces(resyncPeriod time.Duration, handler func(*v1.Namespace) error) {
+	stopC := make(chan struct{})
 	_, c := cache.NewInformer(
 		cache.NewListWatchFromClient(k.Kclient.Core().RESTClient(), "namespaces", v1.NamespaceAll, fields.Everything()),
 		&v1.Namespace{},
@@ -163,7 +164,12 @@ func (k *K8sutilInterface) WatchNamespaces(stop chan struct{}, resyncPeriod time
 					log.Println(err)
 				}
 			},
+			UpdateFunc: func(_ interface{}, obj interface{}) {
+				if err := handler(obj.(*v1.Namespace)); err != nil {
+					log.Println(err)
+				}
+			},
 		},
 	)
-	c.Run(stop)
+	c.Run(stopC)
 }

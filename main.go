@@ -128,7 +128,7 @@ func (c *controller) getECRAuthorizationKey() (AuthToken, error) {
 	if err != nil {
 		// Print the error, cast err to awserr.Error to get the Code and
 		// Message from an error.
-		fmt.Println(err.Error())
+		logrus.Println(err.Error())
 		return AuthToken{}, err
 	}
 
@@ -239,17 +239,15 @@ func (c *controller) generateSecrets() []*v1.Secret {
 	secretGenerators := getSecretGenerators(c)
 
 	for _, secretGenerator := range secretGenerators {
-		fmt.Printf("------------------ [%s] ----------------------\n", secretGenerator.SecretName)
+		logrus.Printf("------------------ [%s] ----------------------\n", secretGenerator.SecretName)
 
 		newToken, err := secretGenerator.TokenGenFxn()
 		if err != nil {
-			fmt.Printf("Error getting secret for provider %s. Skipping secret provider! [Err: %s]", secretGenerator.SecretName, err)
+			logrus.Printf("Error getting secret for provider %s. Skipping secret provider! [Err: %s]", secretGenerator.SecretName, err)
 			continue
 		}
 		newSecret := generateSecretObj(newToken.AccessToken, newToken.Endpoint, secretGenerator.IsJSONCfg, secretGenerator.SecretName)
 		secrets = append(secrets, newSecret)
-
-		fmt.Println("Finished processing secret for: ", secretGenerator.SecretName)
 	}
 	return secrets
 }
@@ -266,6 +264,23 @@ func validateParams() {
 	if len(awsAccountIDEnv) > 0 {
 		awsAccountID = awsAccountIDEnv
 	}
+}
+
+func handler(c *controller, ns *v1.Namespace) error {
+	log.Print("Refreshing credentials...")
+	secrets := c.generateSecrets()
+	for _, secret := range secrets {
+		if *argSkipKubeSystem && ns.GetName() == "kube-system" {
+			continue
+		}
+
+		if err := c.processNamespace(ns, secret); err != nil {
+			return err
+		}
+
+		log.Printf("Finished processing secret for namespace %s, secret %s", ns.Name, secret.Name)
+	}
+	return nil
 }
 
 func main() {
@@ -288,22 +303,7 @@ func main() {
 	gcrClient := newGcrClient()
 	c := &controller{util, ecrClient, gcrClient}
 
-	stopC := make(chan struct{})
-
-	util.WatchNamespaces(stopC, time.Duration(*argRefreshMinutes)*time.Minute, func(ns *v1.Namespace) error {
-		log.Print("Refreshing credentials...")
-		secrets := c.generateSecrets()
-		for _, secret := range secrets {
-			if *argSkipKubeSystem && ns.GetName() == "kube-system" {
-				continue
-			}
-
-			if err := c.processNamespace(ns, secret); err != nil {
-				return err
-			}
-
-			log.Printf("Finished processing secret for namespace %s, secret %s", ns.Name, secret.Name)
-		}
-		return nil
+	util.WatchNamespaces(time.Duration(*argRefreshMinutes)*time.Minute, func(ns *v1.Namespace) error {
+		return handler(c, ns)
 	})
 }
