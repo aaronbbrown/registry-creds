@@ -194,19 +194,20 @@ func (c *controller) processNamespace(namespace *v1.Namespace, secret *v1.Secret
 		// Secret not found, create
 		err := c.k8sutil.CreateSecret(namespace.GetName(), secret)
 		if err != nil {
-			return err
+			return fmt.Errorf("Could not create Secret! %v", err)
 		}
 	} else {
 		// Existing secret needs updated
 		err := c.k8sutil.UpdateSecret(namespace.GetName(), secret)
 		if err != nil {
-			return err
+			return fmt.Errorf("Could not update Secret! %v", err)
 		}
 	}
 
 	// Check if ServiceAccount exists
 	serviceAccount, err := c.k8sutil.GetServiceAccount(namespace.GetName(), "default")
 	if err != nil {
+		fmt.Errorf("Could not get ServiceAccounts! %v", err)
 		return err
 	}
 
@@ -225,7 +226,12 @@ func (c *controller) processNamespace(namespace *v1.Namespace, secret *v1.Secret
 		serviceAccount.ImagePullSecrets = append(serviceAccount.ImagePullSecrets, v1.LocalObjectReference{Name: secret.Name})
 	}
 
-	return c.k8sutil.UpdateServiceAccount(namespace.GetName(), serviceAccount)
+	err = c.k8sutil.UpdateServiceAccount(namespace.GetName(), serviceAccount)
+	if err != nil {
+		return fmt.Errorf("Could not update ServiceAccount! %v", err)
+	}
+
+	return nil
 }
 
 func (c *controller) generateSecrets() []*v1.Secret {
@@ -233,6 +239,8 @@ func (c *controller) generateSecrets() []*v1.Secret {
 	secretGenerators := getSecretGenerators(c)
 
 	for _, secretGenerator := range secretGenerators {
+		fmt.Printf("------------------ [%s] ----------------------\n", secretGenerator.SecretName)
+
 		newToken, err := secretGenerator.TokenGenFxn()
 		if err != nil {
 			fmt.Printf("Error getting secret for provider %s. Skipping secret provider! [Err: %s]", secretGenerator.SecretName, err)
@@ -240,6 +248,8 @@ func (c *controller) generateSecrets() []*v1.Secret {
 		}
 		newSecret := generateSecretObj(newToken.AccessToken, newToken.Endpoint, secretGenerator.IsJSONCfg, secretGenerator.SecretName)
 		secrets = append(secrets, newSecret)
+
+		fmt.Println("Finished processing secret for: ", secretGenerator.SecretName)
 	}
 	return secrets
 }
